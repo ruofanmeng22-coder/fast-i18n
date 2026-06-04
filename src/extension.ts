@@ -3,7 +3,7 @@ import { analyzeContext, containsChinese, containsEnglish, ContextType } from '.
 import { buildReplacement, I18nConfig } from './replacer';
 import { writeKeyValue } from './i18nWriter';
 import { translate, translateToZh } from './translator';
-import { buildKey } from './keyBuilder';
+import { buildKey, isConstantRef, constantRefToI18nKey } from './keyBuilder';
 
 const CONTEXT_LABEL: Record<ContextType, string> = {
   [ContextType.JSX_TEXT]:      'JSX文本',
@@ -32,6 +32,16 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     const selectedText = editor.document.getText(selection);
+
+    // ── 常量引用快捷路径：SCREAMING_SNAKE.DOTTED → formatMessage({ id: '...' }) ──
+    if (isConstantRef(selectedText)) {
+      const replacement = `formatMessage({ id: '${selectedText.trim()}' })`;
+      const ok = await editor.edit(builder => builder.replace(selection, replacement));
+      if (!ok) { vscode.window.showErrorMessage('Fast I18n: 替换失败'); return; }
+      vscode.window.setStatusBarMessage(`Fast I18n ✓  ${selectedText}  →  ${replacement}`, 3000);
+      return;
+    }
+
     const isChinese = containsChinese(selectedText);
     const isEnglish = !isChinese && containsEnglish(selectedText);
 

@@ -48,13 +48,6 @@ const CANDIDATES = [
     { zh: 'src/i18n/zh-CN.json', en: 'src/i18n/en-US.json' },
 ];
 // ── 公开 API ─────────────────────────────────────────────
-/**
- * @param key       i18n key
- * @param zhValue   中文原文（写入 zh-CN 文件）
- * @param enValue   英文译文（写入 en-US 文件）
- * @param configuredPath  fast-i18n.i18nFilePath 配置值（可为空）
- * @param workspaceRoot   工作区根目录绝对路径
- */
 async function writeKeyValue(key, zhValue, enValue, configuredPath, workspaceRoot) {
     const pair = await resolvePair(configuredPath, workspaceRoot);
     if (!pair) {
@@ -67,7 +60,6 @@ async function writeKeyValue(key, zhValue, enValue, configuredPath, workspaceRoo
 }
 async function resolvePair(configuredPath, root) {
     if (configuredPath) {
-        // 用户手动配置：zh = 配置路径，en = 同目录同后缀替换
         const abs = path.isAbsolute(configuredPath)
             ? configuredPath
             : path.join(root, configuredPath);
@@ -90,7 +82,6 @@ async function resolvePair(configuredPath, root) {
         }
         return { zh: abs, en };
     }
-    // 自动探测
     for (const c of CANDIDATES) {
         const absZh = path.join(root, c.zh);
         if (fs.existsSync(absZh)) {
@@ -101,12 +92,11 @@ async function resolvePair(configuredPath, root) {
                     ensureEmptyFile(absEn, c.en.endsWith('.ts'));
                     return { zh: absZh, en: absEn };
                 }
-                return { zh: absZh, en: '' }; // en='' 表示跳过
+                return { zh: absZh, en: '' };
             }
             return { zh: absZh, en: absEn };
         }
     }
-    // 都不存在
     const choice = await vscode.window.showWarningMessage(`Fast I18n: 未找到 i18n 文件，是否在 src/locales/ 创建 zh-CN.ts 和 en-US.ts？`, '创建', '取消');
     if (choice !== '创建') {
         return undefined;
@@ -123,9 +113,54 @@ async function writeSingleFile(key, value, absPath) {
     if (!fs.existsSync(absPath)) {
         ensureEmptyFile(absPath, isTs);
     }
+    if (isTs) {
+        const raw = fs.readFileSync(absPath, 'utf-8');
+        if (isBarrelFile(raw)) {
+            // Barrel: resolve to a sub-file and write there
+            const subFile = await resolveSubFile(key, absPath, raw);
+            if (!subFile) {
+                return;
+            }
+            const subRaw = fs.existsSync(subFile)
+                ? fs.readFileSync(subFile, 'utf-8')
+                : 'export default {\n};\n';
+            if (!isFlatTsFile(subRaw)) {
+                vscode.window.showErrorMessage(`Fast I18n: 子文件 ${path.basename(subFile)} 也是 barrel，不支持二层嵌套，请手动写入`);
+                return;
+            }
+            try {
+                appendToFlatFile(key, value, subFile, subRaw);
+            }
+            catch (e) {
+                handleAppendError(e, key, subFile);
+            }
+            return;
+        }
+        if (isFlatTsFile(raw)) {
+            try {
+                appendToFlatFile(key, value, absPath, raw);
+            }
+            catch (e) {
+                handleAppendError(e, key, absPath);
+            }
+            return;
+        }
+        // Fallback: vm parse (legacy flat files without strict format)
+        let obj;
+        try {
+            obj = readTsFile(absPath);
+        }
+        catch (e) {
+            vscode.window.showErrorMessage(`Fast I18n: 文件解析失败 ${absPath} — ${e.message}`);
+            return;
+        }
+        await writeObjToTs(key, value, absPath, obj);
+        return;
+    }
+    // JSON
     let obj;
     try {
-        obj = isTs ? readTsFile(absPath) : readJsonFile(absPath);
+        obj = readJsonFile(absPath);
     }
     catch (e) {
         vscode.window.showErrorMessage(`Fast I18n: 文件解析失败 ${absPath} — ${e.message}`);
@@ -139,18 +174,148 @@ async function writeSingleFile(key, value, absPath) {
     }
     obj[key] = value;
     try {
-        if (isTs) {
-            writeTsFile(absPath, obj);
-        }
-        else {
-            writeJsonFile(absPath, obj);
-        }
+        writeJsonFile(absPath, obj);
     }
     catch (e) {
         vscode.window.showErrorMessage(`Fast I18n: 文件写入失败 ${absPath} — ${e.message}`);
     }
 }
-// ── .ts 读写 ─────────────────────────────────────────────
+// ── 文件类型判断 ─────────────────────────────────────────
+/** Barrel: has `import X from` lines AND `export default {` */
+function isBarrelFile(content) {
+    return /^\s*import\s+\w/m.test(content) &&
+        /export\s+default\s*\{/.test(content);
+}
+/** Flat: has `export default {` but NO import statements */
+function isFlatTsFile(content) {
+    return !(/^\s*import\s+\w/m.test(content)) &&
+        /export\s+default\s*\{/.test(content);
+}
+function parseBarrelImports(content, barrelAbsPath) {
+    const dir = path.dirname(barrelAbsPath);
+    const results = [];
+    // Match: import name from './path' or "../path"
+    const re = /^\s*import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/gm;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const name = m[1];
+        const rawPath = m[2];
+        // Only handle relative paths; skip aliases
+        if (!rawPath.startsWith('.')) {
+            continue;
+        }
+        const resolved = path.resolve(dir, rawPath);
+        // Try with .ts extension if no extension given
+        const absPath = fs.existsSync(resolved)
+            ? resolved
+            : fs.existsSync(resolved + '.ts')
+                ? resolved + '.ts'
+                : null;
+        if (absPath) {
+            results.push({ name, absPath });
+        }
+    }
+    return results;
+}
+async function resolveSubFile(key, barrelAbsPath, content) {
+    const imports = parseBarrelImports(content, barrelAbsPath);
+    if (imports.length === 0) {
+        vscode.window.showErrorMessage(`Fast I18n: 无法解析 ${path.basename(barrelAbsPath)} 的子文件列表，请手动写入`);
+        return undefined;
+    }
+    // Auto-match: key first segment equals import name exactly
+    const prefix = key.split('.')[0];
+    const autoMatch = imports.find(i => i.name === prefix);
+    if (autoMatch) {
+        return autoMatch.absPath;
+    }
+    // QuickPick fallback
+    const items = imports.map(i => ({
+        label: i.name,
+        description: path.relative(path.dirname(barrelAbsPath), i.absPath),
+        absPath: i.absPath,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+        placeHolder: `选择写入 "${key}" 的子文件`,
+    });
+    return picked?.absPath;
+}
+function detectStyle(content) {
+    // Count key quote usage
+    const singleKeyCount = (content.match(/^\s*'[\w.]+'\s*:/gm) || []).length;
+    const doubleKeyCount = (content.match(/^\s*"[\w.]+"\s*:/gm) || []).length;
+    const keyQuote = singleKeyCount >= doubleKeyCount ? "'" : '"';
+    // Count value quote usage
+    const singleValCount = (content.match(/:\s*'[^']*'/g) || []).length;
+    const doubleValCount = (content.match(/:\s*"[^"]*"/g) || []).length;
+    const valueQuote = singleValCount >= doubleValCount ? "'" : '"';
+    // Detect indent from first key line
+    const indentMatch = content.match(/^(\s+)['"][\w.]+['"]\s*:/m);
+    const indent = indentMatch ? indentMatch[1] : '  ';
+    return { keyQuote, valueQuote, indent };
+}
+function quoteValue(s, q) {
+    return q + s.replace(/\\/g, '\\\\').replace(new RegExp(q, 'g'), `\\${q}`) + q;
+}
+// ── Flat TS append ───────────────────────────────────────
+function appendToFlatFile(key, value, absPath, content) {
+    // Duplicate check
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`["']${escapedKey}["']\\s*:`).test(content)) {
+        throw new Error(`Key "${key}" 已存在于文件中，跳过写入`);
+    }
+    const exportStart = content.search(/export\s+default\s*\{/);
+    if (exportStart === -1) {
+        throw new Error('无法定位 export default {，请手动写入');
+    }
+    // Brace-walk to find matching closing }
+    let depth = 0;
+    let closingIdx = -1;
+    for (let i = exportStart; i < content.length; i++) {
+        if (content[i] === '{') {
+            depth++;
+        }
+        else if (content[i] === '}') {
+            depth--;
+            if (depth === 0) {
+                closingIdx = i;
+                break;
+            }
+        }
+    }
+    if (closingIdx === -1) {
+        throw new Error('无法定位 export default 结尾 }，请手动写入');
+    }
+    const style = detectStyle(content);
+    const insertion = `${style.indent}${quoteValue(key, style.keyQuote)}: ${quoteValue(value, style.valueQuote)},\n`;
+    const updated = content.slice(0, closingIdx) + insertion + content.slice(closingIdx);
+    fs.writeFileSync(absPath, updated, 'utf-8');
+}
+function handleAppendError(e, key, absPath) {
+    const msg = e.message;
+    if (msg.startsWith(`Key "${key}" 已存在`)) {
+        vscode.window.showWarningMessage(`Fast I18n: ${msg}`);
+    }
+    else {
+        vscode.window.showErrorMessage(`Fast I18n: 文件写入失败 ${absPath} — ${msg}`);
+    }
+}
+// ── Legacy vm path (flat ts fallback) ───────────────────
+async function writeObjToTs(key, value, absPath, obj) {
+    if (key in obj && obj[key] !== value) {
+        const choice = await vscode.window.showWarningMessage(`Fast I18n: Key "${key}" 已存在（值: "${obj[key]}"），是否覆盖？`, '覆盖', '取消');
+        if (choice !== '覆盖') {
+            return;
+        }
+    }
+    obj[key] = value;
+    try {
+        writeTsFile(absPath, obj);
+    }
+    catch (e) {
+        vscode.window.showErrorMessage(`Fast I18n: 文件写入失败 ${absPath} — ${e.message}`);
+    }
+}
 function readTsFile(absPath) {
     const content = fs.readFileSync(absPath, 'utf-8');
     const match = content.match(/export\s+default\s+([\s\S]*?);?\s*$/);
@@ -172,7 +337,7 @@ function writeTsFile(absPath, obj) {
     const body = JSON.stringify(obj, null, 2);
     fs.writeFileSync(absPath, `export default ${body};\n`, 'utf-8');
 }
-// ── .json 读写 ───────────────────────────────────────────
+// ── JSON 读写 ────────────────────────────────────────────
 function readJsonFile(absPath) {
     return JSON.parse(fs.readFileSync(absPath, 'utf-8'));
 }

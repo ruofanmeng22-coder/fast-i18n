@@ -66,6 +66,17 @@ function activate(context) {
             return;
         }
         const selectedText = editor.document.getText(selection);
+        // ── 常量引用快捷路径：SCREAMING_SNAKE.DOTTED → formatMessage({ id: '...' }) ──
+        if ((0, keyBuilder_1.isConstantRef)(selectedText)) {
+            const replacement = `formatMessage({ id: '${selectedText.trim()}' })`;
+            const ok = await editor.edit(builder => builder.replace(selection, replacement));
+            if (!ok) {
+                vscode.window.showErrorMessage('Fast I18n: 替换失败');
+                return;
+            }
+            vscode.window.setStatusBarMessage(`Fast I18n ✓  ${selectedText}  →  ${replacement}`, 3000);
+            return;
+        }
         const isChinese = (0, contextAnalyzer_1.containsChinese)(selectedText);
         const isEnglish = !isChinese && (0, contextAnalyzer_1.containsEnglish)(selectedText);
         if (!isChinese && !isEnglish) {
