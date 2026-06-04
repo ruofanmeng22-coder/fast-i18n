@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { analyzeContext, containsChinese, ContextType } from './contextAnalyzer';
 import { buildReplacement, I18nConfig } from './replacer';
 import { writeKeyValue } from './i18nWriter';
+import { translate } from './translator';
+import { buildKey } from './keyBuilder';
 
 const CONTEXT_LABEL: Record<ContextType, string> = {
   [ContextType.JSX_TEXT]:      'JSX文本',
@@ -38,10 +40,35 @@ export function activate(context: vscode.ExtensionContext) {
     // ── 上下文分析 ────────────────────────────────────────
     const analysis = analyzeContext(editor.document, selection);
 
+    // ── 翻译 + 生成建议 key ───────────────────────────────
+    let enText = '';
+    let translationFailed = false;
+
+    try {
+      enText = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Fast I18n: 正在翻译…',
+          cancellable: false,
+        },
+        () => translate(selectedText)
+      );
+    } catch {
+      translationFailed = true;
+    }
+
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    const filePath = editor.document.uri.fsPath;
+    const suggestedKey = buildKey(enText || selectedText, filePath, root);
+
+    if (translationFailed || !enText) {
+      vscode.window.setStatusBarMessage('Fast I18n ⚠ 翻译失败，已使用备用 key', 4000);
+    }
+
     // ── 输入 Key ──────────────────────────────────────────
     const key = await vscode.window.showInputBox({
-      prompt: `[${CONTEXT_LABEL[analysis.contextType]}] 输入 i18n Key —— 原文：${selectedText}`,
-      placeHolder: 'e.g. common.confirm',
+      prompt: `[${CONTEXT_LABEL[analysis.contextType]}] 确认/修改 i18n Key —— 原文：${selectedText}`,
+      value: suggestedKey,
       validateInput: (val) => {
         if (!val.trim()) { return 'Key 不能为空'; }
         if (/\s/.test(val)) { return 'Key 不能含空格'; }
@@ -49,7 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
         return undefined;
       },
     });
-    if (key === undefined) { return; } // 用户取消
+    if (key === undefined) { return; }
 
     // ── 生成替换文本 ──────────────────────────────────────
     const config = getConfig();
@@ -64,12 +91,12 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    // ── 写入 i18n 文件 ────────────────────────────────────
-    const i18nPath = vscode.workspace
+    // ── 写入双语 i18n 文件 ────────────────────────────────
+    const configuredPath = vscode.workspace
       .getConfiguration('fast-i18n')
       .get<string>('i18nFilePath', '');
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-    await writeKeyValue(key, selectedText, '', i18nPath, root);
+
+    await writeKeyValue(key, selectedText, enText || selectedText, configuredPath, root);
 
     // ── 状态栏提示 ────────────────────────────────────────
     vscode.window.setStatusBarMessage(

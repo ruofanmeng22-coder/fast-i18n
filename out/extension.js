@@ -39,6 +39,8 @@ const vscode = __importStar(require("vscode"));
 const contextAnalyzer_1 = require("./contextAnalyzer");
 const replacer_1 = require("./replacer");
 const i18nWriter_1 = require("./i18nWriter");
+const translator_1 = require("./translator");
+const keyBuilder_1 = require("./keyBuilder");
 const CONTEXT_LABEL = {
     [contextAnalyzer_1.ContextType.JSX_TEXT]: 'JSX文本',
     [contextAnalyzer_1.ContextType.JSX_ATTR_STR]: 'JSX属性',
@@ -70,10 +72,29 @@ function activate(context) {
         }
         // ── 上下文分析 ────────────────────────────────────────
         const analysis = (0, contextAnalyzer_1.analyzeContext)(editor.document, selection);
+        // ── 翻译 + 生成建议 key ───────────────────────────────
+        let enText = '';
+        let translationFailed = false;
+        try {
+            enText = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Fast I18n: 正在翻译…',
+                cancellable: false,
+            }, () => (0, translator_1.translate)(selectedText));
+        }
+        catch {
+            translationFailed = true;
+        }
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+        const filePath = editor.document.uri.fsPath;
+        const suggestedKey = (0, keyBuilder_1.buildKey)(enText || selectedText, filePath, root);
+        if (translationFailed || !enText) {
+            vscode.window.setStatusBarMessage('Fast I18n ⚠ 翻译失败，已使用备用 key', 4000);
+        }
         // ── 输入 Key ──────────────────────────────────────────
         const key = await vscode.window.showInputBox({
-            prompt: `[${CONTEXT_LABEL[analysis.contextType]}] 输入 i18n Key —— 原文：${selectedText}`,
-            placeHolder: 'e.g. common.confirm',
+            prompt: `[${CONTEXT_LABEL[analysis.contextType]}] 确认/修改 i18n Key —— 原文：${selectedText}`,
+            value: suggestedKey,
             validateInput: (val) => {
                 if (!val.trim()) {
                     return 'Key 不能为空';
@@ -89,7 +110,7 @@ function activate(context) {
         });
         if (key === undefined) {
             return;
-        } // 用户取消
+        }
         // ── 生成替换文本 ──────────────────────────────────────
         const config = getConfig();
         const replacement = (0, replacer_1.buildReplacement)(key, analysis.contextType, config);
@@ -101,12 +122,11 @@ function activate(context) {
             vscode.window.showErrorMessage('Fast I18n: 替换失败');
             return;
         }
-        // ── 写入 i18n 文件 ────────────────────────────────────
-        const i18nPath = vscode.workspace
+        // ── 写入双语 i18n 文件 ────────────────────────────────
+        const configuredPath = vscode.workspace
             .getConfiguration('fast-i18n')
             .get('i18nFilePath', '');
-        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
-        await (0, i18nWriter_1.writeKeyValue)(key, selectedText, '', i18nPath, root);
+        await (0, i18nWriter_1.writeKeyValue)(key, selectedText, enText || selectedText, configuredPath, root);
         // ── 状态栏提示 ────────────────────────────────────────
         vscode.window.setStatusBarMessage(`Fast I18n ✓  [${CONTEXT_LABEL[analysis.contextType]}]  ${selectedText}  →  ${replacement}`, 3000);
     });
