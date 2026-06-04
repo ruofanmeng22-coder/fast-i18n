@@ -1,6 +1,19 @@
 import * as https from 'https';
 
 const cache = new Map<string, string>();
+const MAX_CACHE = 500;
+const EVICT_COUNT = 100;
+
+function cacheSet(key: string, value: string): void {
+  if (cache.size >= MAX_CACHE) {
+    let evicted = 0;
+    for (const k of cache.keys()) {
+      cache.delete(k);
+      if (++evicted >= EVICT_COUNT) { break; }
+    }
+  }
+  cache.set(key, value);
+}
 
 export async function translate(text: string): Promise<string> {
   if (cache.has(text)) {
@@ -9,12 +22,15 @@ export async function translate(text: string): Promise<string> {
 
   try {
     const result = await fetchTranslation(text);
-    const translated = result || fallback(text);
-    cache.set(text, translated);
+    const translated = result; // trust the resolve; catch handles failures
+    cacheSet(text, translated);
     return translated;
-  } catch {
+  } catch (e) {
     const fb = fallback(text);
-    cache.set(text, fb);
+    if ((e as Error).message === 'parse error') {
+      cacheSet(text, fb); // API responded but was unparseable — stable, cache it
+    }
+    // timeout/network errors: return fallback but don't cache (allow retry next time)
     return fb;
   }
 }
@@ -26,6 +42,11 @@ function fetchTranslation(text: string): Promise<string> {
       `?client=gtx&sl=zh-CN&tl=en&dt=t&q=${encodeURIComponent(text)}`;
 
     const req = https.get(url, { timeout: 5000 }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
       let raw = '';
       res.on('data', (chunk) => { raw += chunk; });
       res.on('end', () => {
