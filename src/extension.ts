@@ -1,0 +1,92 @@
+import * as vscode from 'vscode';
+import { analyzeContext, containsChinese, ContextType } from './contextAnalyzer';
+import { buildReplacement, I18nConfig } from './replacer';
+import { writeKeyValue } from './i18nWriter';
+
+const CONTEXT_LABEL: Record<ContextType, string> = {
+  [ContextType.JSX_TEXT]:      'JSX文本',
+  [ContextType.JSX_ATTR_STR]:  'JSX属性',
+  [ContextType.JSX_ATTR_EXPR]: 'JSX表达式',
+  [ContextType.JS_STRING]:     'JS字符串',
+  [ContextType.TEMPLATE_EXPR]: '模板字符串',
+  [ContextType.UNKNOWN]:       '未知',
+};
+
+export function activate(context: vscode.ExtensionContext) {
+  const cmd = vscode.commands.registerCommand('fast-i18n.replace', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) { return; }
+
+    const selection = editor.selection;
+
+    // ── 校验 ──────────────────────────────────────────────
+    if (selection.isEmpty) {
+      vscode.window.showWarningMessage('Fast I18n: 请先选中中文文本');
+      return;
+    }
+    if (selection.start.line !== selection.end.line) {
+      vscode.window.showWarningMessage('Fast I18n: 暂不支持多行选区');
+      return;
+    }
+
+    const selectedText = editor.document.getText(selection);
+    if (!containsChinese(selectedText)) {
+      vscode.window.showWarningMessage('Fast I18n: 选中内容不含中文');
+      return;
+    }
+
+    // ── 上下文分析 ────────────────────────────────────────
+    const analysis = analyzeContext(editor.document, selection);
+
+    // ── 输入 Key ──────────────────────────────────────────
+    const key = await vscode.window.showInputBox({
+      prompt: `[${CONTEXT_LABEL[analysis.contextType]}] 输入 i18n Key —— 原文：${selectedText}`,
+      placeHolder: 'e.g. common.confirm',
+      validateInput: (val) => {
+        if (!val.trim()) { return 'Key 不能为空'; }
+        if (/\s/.test(val)) { return 'Key 不能含空格'; }
+        if (!/^[a-zA-Z0-9._-]+$/.test(val)) { return '只允许：字母 数字 . _ -'; }
+        return undefined;
+      },
+    });
+    if (key === undefined) { return; } // 用户取消
+
+    // ── 生成替换文本 ──────────────────────────────────────
+    const config = getConfig();
+    const replacement = buildReplacement(key, analysis.contextType, config);
+
+    // ── 执行替换 ──────────────────────────────────────────
+    const ok = await editor.edit((builder) => {
+      builder.replace(analysis.replaceRange, replacement);
+    });
+    if (!ok) {
+      vscode.window.showErrorMessage('Fast I18n: 替换失败');
+      return;
+    }
+
+    // ── 写入 i18n 文件 ────────────────────────────────────
+    const i18nPath = vscode.workspace
+      .getConfiguration('fast-i18n')
+      .get<string>('i18nFilePath', '');
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+    await writeKeyValue(key, selectedText, '', i18nPath, root);
+
+    // ── 状态栏提示 ────────────────────────────────────────
+    vscode.window.setStatusBarMessage(
+      `Fast I18n ✓  [${CONTEXT_LABEL[analysis.contextType]}]  ${selectedText}  →  ${replacement}`,
+      3000
+    );
+  });
+
+  context.subscriptions.push(cmd);
+}
+
+export function deactivate() {}
+
+function getConfig(): I18nConfig {
+  const cfg = vscode.workspace.getConfiguration('fast-i18n');
+  return {
+    functionStyle:    cfg.get<string>('functionStyle',    ''),
+    functionTemplate: cfg.get<string>('functionTemplate', ''),
+  };
+}
