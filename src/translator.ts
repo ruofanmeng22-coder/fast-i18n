@@ -35,6 +35,57 @@ export async function translate(text: string): Promise<string> {
   }
 }
 
+export async function translateToZh(text: string): Promise<string> {
+  const cacheKey = `zh:${text}`;
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey)!;
+  }
+
+  try {
+    const result = await fetchTranslationToZh(text);
+    cacheSet(cacheKey, result);
+    return result;
+  } catch (e) {
+    const fb = fallback(text);
+    if ((e as Error).message === 'parse error') {
+      cacheSet(cacheKey, fb);
+    }
+    return fb;
+  }
+}
+
+function fetchTranslationToZh(text: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url =
+      'https://translate.googleapis.com/translate_a/single' +
+      `?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`;
+
+    const req = https.get(url, { timeout: 5000 }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error(`HTTP ${res.statusCode}`));
+        return;
+      }
+      let raw = '';
+      res.on('data', (chunk) => { raw += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(raw);
+          const translated: string = json[0]
+            .map((part: any[]) => part[0])
+            .join('');
+          resolve(translated.trim());
+        } catch {
+          reject(new Error('parse error'));
+        }
+      });
+    });
+
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', reject);
+  });
+}
+
 function fetchTranslation(text: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const url =
