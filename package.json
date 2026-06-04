@@ -1,0 +1,71 @@
+{
+  "name": "fast-i18n",
+  "displayName": "Fast I18n",
+  "description": "One-click i18n replacement for React projects",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:fast-i18n.replace"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "fast-i18n.replace",
+        "title": "Fast I18n: Replace with i18n Key"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "fast-i18n.replace",
+          "when": "editorHasSelection",
+          "group": "1_modification"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Fast I18n",
+      "properties": {
+        "fast-i18n.functionStyle": {
+          "type": "string",
+          "enum": ["", "t", "formatMessage", "intl.formatMessage", "custom"],
+          "enumDescriptions": [
+            "仅输出 key",
+            "t('key')",
+            "formatMessage('key')",
+            "intl.formatMessage({ id: 'key' })",
+            "自定义模板，见 functionTemplate"
+          ],
+          "default": "",
+          "description": "i18n 函数调用风格"
+        },
+        "fast-i18n.functionTemplate": {
+          "type": "string",
+          "default": "",
+          "description": "functionStyle 为 custom 时的模板，用 {{key}} 占位。例：i18n.get('{{key}}')"
+        },
+        "fast-i18n.i18nFilePath": {
+          "type": "string",
+          "default": "",
+          "description": "i18n JSON 文件路径（相对工作区根目录），为空则不写文件"
+        },
+        "fast-i18n.keyPrefixStrip": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["src", "pages", "components", "views"],
+          "description": "推断 i18n key 前缀时，从文件路径中剥离的顶层目录名"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "@types/node": "16.x",
+    "typescript": "^5.0.0"
+  }
+}
