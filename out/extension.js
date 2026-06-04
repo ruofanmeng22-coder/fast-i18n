@@ -66,30 +66,47 @@ function activate(context) {
             return;
         }
         const selectedText = editor.document.getText(selection);
-        if (!(0, contextAnalyzer_1.containsChinese)(selectedText)) {
-            vscode.window.showWarningMessage('Fast I18n: 选中内容不含中文');
+        const isChinese = (0, contextAnalyzer_1.containsChinese)(selectedText);
+        const isEnglish = !isChinese && (0, contextAnalyzer_1.containsEnglish)(selectedText);
+        if (!isChinese && !isEnglish) {
+            vscode.window.showWarningMessage('Fast I18n: 选中内容不含中文或英文');
             return;
         }
         // ── 上下文分析 ────────────────────────────────────────
         const analysis = (0, contextAnalyzer_1.analyzeContext)(editor.document, selection);
         // ── 翻译 + 生成建议 key ───────────────────────────────
-        let enText = '';
-        let translationFailed = false;
-        try {
-            enText = await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: 'Fast I18n: 正在翻译…',
-                cancellable: false,
-            }, () => (0, translator_1.translate)(selectedText));
-        }
-        catch {
-            translationFailed = true;
-        }
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
         const filePath = editor.document.uri.fsPath;
+        let zhText = '';
+        let enText = '';
+        let translationFailed = false;
+        if (isChinese) {
+            // 中文路径：译成英文，key 从英文生成
+            try {
+                enText = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Fast I18n: 正在翻译…', cancellable: false }, () => (0, translator_1.translate)(selectedText));
+            }
+            catch {
+                translationFailed = true;
+            }
+            zhText = selectedText;
+        }
+        else {
+            // 英文路径：译成中文，key 从英文原文生成
+            enText = selectedText;
+            try {
+                zhText = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Fast I18n: 正在翻译…', cancellable: false }, () => (0, translator_1.translateToZh)(selectedText));
+            }
+            catch {
+                translationFailed = true;
+                zhText = selectedText; // 降级：zh-CN 写英文原文
+            }
+        }
         const suggestedKey = (0, keyBuilder_1.buildKey)(enText || selectedText, filePath, root);
-        if (translationFailed || !enText) {
+        if (isChinese && (translationFailed || !enText)) {
             vscode.window.setStatusBarMessage('Fast I18n ⚠ 翻译失败，已使用备用 key', 4000);
+        }
+        if (!isChinese && translationFailed) {
+            vscode.window.setStatusBarMessage('Fast I18n ⚠ 翻译失败，zh-CN 将写入英文原文', 4000);
         }
         // ── 输入 Key ──────────────────────────────────────────
         const key = await vscode.window.showInputBox({
@@ -126,7 +143,7 @@ function activate(context) {
         const configuredPath = vscode.workspace
             .getConfiguration('fast-i18n')
             .get('i18nFilePath', '');
-        await (0, i18nWriter_1.writeKeyValue)(key, selectedText, enText || selectedText, configuredPath, root);
+        await (0, i18nWriter_1.writeKeyValue)(key, zhText || selectedText, enText || selectedText, configuredPath, root);
         // ── 状态栏提示 ────────────────────────────────────────
         vscode.window.setStatusBarMessage(`Fast I18n ✓  [${CONTEXT_LABEL[analysis.contextType]}]  ${selectedText}  →  ${replacement}`, 3000);
     });
