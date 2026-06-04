@@ -6,15 +6,15 @@ export function buildKey(
   filePath: string,
   workspaceRoot: string
 ): string {
-  const prefix = inferPrefix(filePath, workspaceRoot);
-  const suffix = toScreamingSnakeCase(enText);
-  return prefix ? `${prefix}.${suffix}` : suffix;
-}
-
-function inferPrefix(filePath: string, workspaceRoot: string): string {
   const stripDirs: string[] = vscode.workspace
     .getConfiguration('fast-i18n')
     .get<string[]>('keyPrefixStrip', ['src', 'pages', 'components', 'views']);
+  const prefix = inferPrefix(filePath, workspaceRoot, stripDirs);
+  const suffix = toScreamingSnakeCase(enText);
+  return prefix && suffix ? `${prefix}.${suffix}` : prefix || suffix;
+}
+
+function inferPrefix(filePath: string, workspaceRoot: string, stripDirs: string[]): string {
 
   // 转相对路径，统一用 /
   const rel = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
