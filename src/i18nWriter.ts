@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as vm from 'vm';
 
 // ── 候选路径配对 ─────────────────────────────────────────
 const CANDIDATES: Array<{ zh: string; en: string }> = [
@@ -39,7 +40,10 @@ export async function writeKeyValue(
 
 // ── 路径探测 ─────────────────────────────────────────────
 
-interface FilePair { zh: string; en: string; }
+interface FilePair {
+  zh: string;
+  en: string; // '' means skip en write
+}
 
 async function resolvePair(
   configuredPath: string,
@@ -51,6 +55,28 @@ async function resolvePair(
       ? configuredPath
       : path.join(root, configuredPath);
     const en = abs.replace(/zh[-_]?CN/i, 'en-US').replace(/\bzh\b/i, 'en');
+
+    if (!fs.existsSync(abs)) {
+      const choice = await vscode.window.showWarningMessage(
+        `Fast I18n: 配置的 i18n 文件不存在 ${configuredPath}，是否创建？`,
+        '创建', '取消'
+      );
+      if (choice !== '创建') { return undefined; }
+      ensureEmptyFile(abs, abs.endsWith('.ts'));
+    }
+
+    if (en !== abs && !fs.existsSync(en)) {
+      const choice = await vscode.window.showWarningMessage(
+        `Fast I18n: 未找到对应英文文件，是否创建？`,
+        '创建', '跳过'
+      );
+      if (choice === '创建') {
+        ensureEmptyFile(en, en.endsWith('.ts'));
+      } else {
+        return { zh: abs, en: '' };
+      }
+    }
+
     return { zh: abs, en };
   }
 
@@ -138,11 +164,19 @@ async function writeSingleFile(
 
 function readTsFile(absPath: string): Record<string, string> {
   const content = fs.readFileSync(absPath, 'utf-8');
-  const match = content.match(/export\s+default\s+(\{[\s\S]*\})\s*;?\s*$/);
+  const match = content.match(/export\s+default\s+([\s\S]*?);?\s*$/);
   if (!match) {
     throw new Error('不是 `export default { ... }` 格式，无法解析');
   }
-  return JSON.parse(match[1]);
+  try {
+    const obj = vm.runInNewContext(`(${match[1]})`, {});
+    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+      throw new Error('export default 值必须是对象');
+    }
+    return obj as Record<string, string>;
+  } catch (e) {
+    throw new Error(`对象解析失败: ${(e as Error).message}`);
+  }
 }
 
 function writeTsFile(absPath: string, obj: Record<string, string>): void {
