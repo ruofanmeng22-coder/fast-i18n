@@ -1,9 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vm from 'vm';
 
-// ── 候选路径配对 ─────────────────────────────────────────
 const CANDIDATES: Array<{ zh: string; en: string }> = [
   { zh: 'src/locales/zh-CN.ts',   en: 'src/locales/en-US.ts'   },
   { zh: 'src/locales/zh-CN.json', en: 'src/locales/en-US.json' },
@@ -12,8 +10,6 @@ const CANDIDATES: Array<{ zh: string; en: string }> = [
   { zh: 'src/i18n/zh-CN.ts',      en: 'src/i18n/en-US.ts'      },
   { zh: 'src/i18n/zh-CN.json',    en: 'src/i18n/en-US.json'    },
 ];
-
-// ── 公开 API ─────────────────────────────────────────────
 
 export async function writeKeyValue(
   key: string,
@@ -30,8 +26,6 @@ export async function writeKeyValue(
     await writeSingleFile(key, enValue, pair.en);
   }
 }
-
-// ── 路径探测 ─────────────────────────────────────────────
 
 interface FilePair {
   zh: string;
@@ -54,7 +48,7 @@ async function resolvePair(
         '创建', '取消'
       );
       if (choice !== '创建') { return undefined; }
-      ensureEmptyFile(abs, abs.endsWith('.ts'));
+      await ensureEmptyFile(abs, abs.endsWith('.ts'));
     }
 
     if (en !== abs && !fs.existsSync(en)) {
@@ -63,7 +57,7 @@ async function resolvePair(
         '创建', '跳过'
       );
       if (choice === '创建') {
-        ensureEmptyFile(en, en.endsWith('.ts'));
+        await ensureEmptyFile(en, en.endsWith('.ts'));
       } else {
         return { zh: abs, en: '' };
       }
@@ -82,7 +76,7 @@ async function resolvePair(
           '创建', '跳过'
         );
         if (choice === '创建') {
-          ensureEmptyFile(absEn, c.en.endsWith('.ts'));
+          await ensureEmptyFile(absEn, c.en.endsWith('.ts'));
           return { zh: absZh, en: absEn };
         }
         return { zh: absZh, en: '' };
@@ -99,12 +93,10 @@ async function resolvePair(
 
   const absZh = path.join(root, 'src/locales/zh-CN.ts');
   const absEn = path.join(root, 'src/locales/en-US.ts');
-  ensureEmptyFile(absZh, true);
-  ensureEmptyFile(absEn, true);
+  await ensureEmptyFile(absZh, true);
+  await ensureEmptyFile(absEn, true);
   return { zh: absZh, en: absEn };
 }
-
-// ── 单文件写入 ───────────────────────────────────────────
 
 async function writeSingleFile(
   key: string,
@@ -114,19 +106,18 @@ async function writeSingleFile(
   const isTs = absPath.endsWith('.ts');
 
   if (!fs.existsSync(absPath)) {
-    ensureEmptyFile(absPath, isTs);
+    await ensureEmptyFile(absPath, isTs);
   }
 
   if (isTs) {
-    const raw = fs.readFileSync(absPath, 'utf-8');
+    const raw = await fs.promises.readFile(absPath, 'utf-8');
 
     if (isBarrelFile(raw)) {
-      // Barrel: resolve to a sub-file and write there
       const subFile = await resolveSubFile(key, absPath, raw);
       if (!subFile) { return; }
 
       const subRaw = fs.existsSync(subFile)
-        ? fs.readFileSync(subFile, 'utf-8')
+        ? await fs.promises.readFile(subFile, 'utf-8')
         : 'export default {\n};\n';
 
       if (!isFlatTsFile(subRaw)) {
@@ -137,7 +128,7 @@ async function writeSingleFile(
       }
 
       try {
-        appendToFlatFile(key, value, subFile, subRaw);
+        await appendToFlatFile(key, value, subFile, subRaw);
       } catch (e) {
         handleAppendError(e as Error, key, subFile);
       }
@@ -146,17 +137,16 @@ async function writeSingleFile(
 
     if (isFlatTsFile(raw)) {
       try {
-        appendToFlatFile(key, value, absPath, raw);
+        await appendToFlatFile(key, value, absPath, raw);
       } catch (e) {
         handleAppendError(e as Error, key, absPath);
       }
       return;
     }
 
-    // Fallback: vm parse (legacy flat files without strict format)
     let obj: Record<string, string>;
     try {
-      obj = readTsFile(absPath);
+      obj = await readTsFile(absPath);
     } catch (e) {
       vscode.window.showErrorMessage(
         `Fast I18n: 文件解析失败 ${absPath} — ${(e as Error).message}`
@@ -167,10 +157,9 @@ async function writeSingleFile(
     return;
   }
 
-  // JSON
   let obj: Record<string, string>;
   try {
-    obj = readJsonFile(absPath);
+    obj = await readJsonFile(absPath);
   } catch (e) {
     vscode.window.showErrorMessage(
       `Fast I18n: 文件解析失败 ${absPath} — ${(e as Error).message}`
@@ -188,7 +177,7 @@ async function writeSingleFile(
   obj[key] = value;
 
   try {
-    writeJsonFile(absPath, obj);
+    await writeJsonFile(absPath, obj);
   } catch (e) {
     vscode.window.showErrorMessage(
       `Fast I18n: 文件写入失败 ${absPath} — ${(e as Error).message}`
@@ -196,21 +185,15 @@ async function writeSingleFile(
   }
 }
 
-// ── 文件类型判断 ─────────────────────────────────────────
-
-/** Barrel: has `import X from` lines AND `export default {` */
 function isBarrelFile(content: string): boolean {
   return /^\s*import\s+\w/m.test(content) &&
     /export\s+default\s*\{/.test(content);
 }
 
-/** Flat: has `export default {` but NO import statements */
 function isFlatTsFile(content: string): boolean {
   return !(/^\s*import\s+\w/m.test(content)) &&
     /export\s+default\s*\{/.test(content);
 }
-
-// ── Barrel 子文件解析 ────────────────────────────────────
 
 interface BarrelImport {
   name: string;
@@ -221,16 +204,13 @@ function parseBarrelImports(content: string, barrelAbsPath: string): BarrelImpor
   const dir = path.dirname(barrelAbsPath);
   const results: BarrelImport[] = [];
 
-  // Match: import name from './path' or "../path"
   const re = /^\s*import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
     const name = m[1];
     const rawPath = m[2];
-    // Only handle relative paths; skip aliases
     if (!rawPath.startsWith('.')) { continue; }
     const resolved = path.resolve(dir, rawPath);
-    // Try with .ts extension if no extension given
     const absPath = fs.existsSync(resolved)
       ? resolved
       : fs.existsSync(resolved + '.ts')
@@ -256,14 +236,12 @@ async function resolveSubFile(
     return undefined;
   }
 
-  // Auto-match: key first segment equals import name exactly
   const prefix = key.split('.')[0];
   const autoMatch = imports.find(i => i.name === prefix);
   if (autoMatch) {
     return autoMatch.absPath;
   }
 
-  // QuickPick fallback
   const items = imports.map(i => ({
     label: i.name,
     description: path.relative(path.dirname(barrelAbsPath), i.absPath),
@@ -277,8 +255,6 @@ async function resolveSubFile(
   return picked?.absPath;
 }
 
-// ── 文件风格检测 ─────────────────────────────────────────
-
 interface FileStyle {
   keyQuote: string;
   valueQuote: string;
@@ -286,17 +262,14 @@ interface FileStyle {
 }
 
 function detectStyle(content: string): FileStyle {
-  // Count key quote usage
   const singleKeyCount = (content.match(/^\s*'[\w.]+'\s*:/gm) || []).length;
   const doubleKeyCount = (content.match(/^\s*"[\w.]+"\s*:/gm) || []).length;
   const keyQuote = singleKeyCount >= doubleKeyCount ? "'" : '"';
 
-  // Count value quote usage
   const singleValCount = (content.match(/:\s*'[^']*'/g) || []).length;
   const doubleValCount = (content.match(/:\s*"[^"]*"/g) || []).length;
   const valueQuote = singleValCount >= doubleValCount ? "'" : '"';
 
-  // Detect indent from first key line
   const indentMatch = content.match(/^(\s+)['"][\w.]+['"]\s*:/m);
   const indent = indentMatch ? indentMatch[1] : '  ';
 
@@ -307,15 +280,12 @@ function quoteValue(s: string, q: string): string {
   return q + s.replace(/\\/g, '\\\\').replace(new RegExp(q, 'g'), `\\${q}`) + q;
 }
 
-// ── Flat TS append ───────────────────────────────────────
-
-function appendToFlatFile(
+async function appendToFlatFile(
   key: string,
   value: string,
   absPath: string,
   content: string
-): void {
-  // Duplicate check
+): Promise<void> {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (new RegExp(`["']${escapedKey}["']\\s*:`).test(content)) {
     throw new Error(`Key "${key}" 已存在于文件中，跳过写入`);
@@ -326,7 +296,6 @@ function appendToFlatFile(
     throw new Error('无法定位 export default {，请手动写入');
   }
 
-  // Brace-walk to find matching closing }
   let depth = 0;
   let closingIdx = -1;
   for (let i = exportStart; i < content.length; i++) {
@@ -343,7 +312,7 @@ function appendToFlatFile(
   const style = detectStyle(content);
   const insertion = `${style.indent}${quoteValue(key, style.keyQuote)}: ${quoteValue(value, style.valueQuote)},\n`;
   const updated = content.slice(0, closingIdx) + insertion + content.slice(closingIdx);
-  fs.writeFileSync(absPath, updated, 'utf-8');
+  await fs.promises.writeFile(absPath, updated, 'utf-8');
 }
 
 function handleAppendError(e: Error, key: string, absPath: string): void {
@@ -356,8 +325,6 @@ function handleAppendError(e: Error, key: string, absPath: string): void {
     );
   }
 }
-
-// ── Legacy vm path (flat ts fallback) ───────────────────
 
 async function writeObjToTs(
   key: string,
@@ -374,7 +341,7 @@ async function writeObjToTs(
   }
   obj[key] = value;
   try {
-    writeTsFile(absPath, obj);
+    await writeTsFile(absPath, obj);
   } catch (e) {
     vscode.window.showErrorMessage(
       `Fast I18n: 文件写入失败 ${absPath} — ${(e as Error).message}`
@@ -382,42 +349,52 @@ async function writeObjToTs(
   }
 }
 
-function readTsFile(absPath: string): Record<string, string> {
-  const content = fs.readFileSync(absPath, 'utf-8');
-  const match = content.match(/export\s+default\s+([\s\S]*?);?\s*$/);
-  if (!match) {
+async function readTsFile(absPath: string): Promise<Record<string, string>> {
+  const content = await fs.promises.readFile(absPath, 'utf-8');
+  const objMatch = content.match(/export\s+default\s*\{([\s\S]*)\}\s*;?\s*$/);
+  if (!objMatch) {
     throw new Error('不是 `export default { ... }` 格式，无法解析');
   }
-  try {
-    const obj = vm.runInNewContext(`(${match[1]})`, {});
-    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-      throw new Error('export default 值必须是对象');
+
+  const body = objMatch[1];
+  const result: Record<string, string> = {};
+
+  const lines = body.split('\n');
+  for (const line of lines) {
+    const lineMatch = line.match(
+      /^\s*['"]?([\w.]+)['"]?\s*:\s*'((?:[^'\\]|\\.)*)'\s*,?\s*$/
+    ) || line.match(
+      /^\s*['"]?([\w.]+)['"]?\s*:\s*"((?:[^"\\]|\\.)*)"\s*,?\s*$/
+    );
+    if (lineMatch) {
+      const rawValue = lineMatch[2];
+      result[lineMatch[1]] = rawValue.replace(/\\(['"])/g, '$1');
     }
-    return obj as Record<string, string>;
-  } catch (e) {
-    throw new Error(`对象解析失败: ${(e as Error).message}`);
   }
+
+  if (Object.keys(result).length === 0 && body.trim().length > 0) {
+    throw new Error('对象解析失败: 无法提取键值对');
+  }
+
+  return result;
 }
 
-function writeTsFile(absPath: string, obj: Record<string, string>): void {
+async function writeTsFile(absPath: string, obj: Record<string, string>): Promise<void> {
   const body = JSON.stringify(obj, null, 2);
-  fs.writeFileSync(absPath, `export default ${body};\n`, 'utf-8');
+  await fs.promises.writeFile(absPath, `export default ${body};\n`, 'utf-8');
 }
 
-// ── JSON 读写 ────────────────────────────────────────────
-
-function readJsonFile(absPath: string): Record<string, string> {
-  return JSON.parse(fs.readFileSync(absPath, 'utf-8'));
+async function readJsonFile(absPath: string): Promise<Record<string, string>> {
+  const content = await fs.promises.readFile(absPath, 'utf-8');
+  return JSON.parse(content);
 }
 
-function writeJsonFile(absPath: string, obj: Record<string, string>): void {
-  fs.writeFileSync(absPath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
+async function writeJsonFile(absPath: string, obj: Record<string, string>): Promise<void> {
+  await fs.promises.writeFile(absPath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
 }
 
-// ── 创建空文件 ───────────────────────────────────────────
-
-function ensureEmptyFile(absPath: string, isTs: boolean): void {
-  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+async function ensureEmptyFile(absPath: string, isTs: boolean): Promise<void> {
+  await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
   const empty = isTs ? 'export default {\n};\n' : '{}\n';
-  fs.writeFileSync(absPath, empty, 'utf-8');
+  await fs.promises.writeFile(absPath, empty, 'utf-8');
 }

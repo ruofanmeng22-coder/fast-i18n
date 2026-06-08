@@ -54,6 +54,44 @@
           "items": { "type": "string" },
           "default": ["src", "pages", "components", "views"],
           "description": "推断 i18n key 前缀时，从文件路径中剥离的顶层目录名"
+        },
+        "fast-i18n.translationService": {
+          "type": "string",
+          "enum": ["google", "baidu", "deepl", "openai", "custom"],
+          "enumDescriptions": [
+            "Google 翻译免费 API（默认，国内可能不可用）",
+            "百度翻译 API（需要 appId + secretKey）",
+            "DeepL 翻译 API（需要 apiKey）",
+            "OpenAI 兼容 API（需要 apiKey）",
+            "自定义翻译服务（需要 apiUrl）"
+          ],
+          "default": "google",
+          "description": "翻译服务提供商"
+        },
+        "fast-i18n.translationApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "翻译 API Key（DeepL / OpenAI / 自定义服务使用）"
+        },
+        "fast-i18n.translationAppId": {
+          "type": "string",
+          "default": "",
+          "description": "百度翻译 App ID"
+        },
+        "fast-i18n.translationSecretKey": {
+          "type": "string",
+          "default": "",
+          "description": "百度翻译密钥"
+        },
+        "fast-i18n.translationApiUrl": {
+          "type": "string",
+          "default": "",
+          "description": "自定义翻译服务 URL（custom 模式必填），或 OpenAI 兼容 API 的 Base URL"
+        },
+        "fast-i18n.translationModel": {
+          "type": "string",
+          "default": "gpt-3.5-turbo",
+          "description": "OpenAI 模型名称（openai 模式使用）"
         }
       }
     }
