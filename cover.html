@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fast I18n Cover</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Fira+Code:wght@400;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    background: #0f0f1a;
+    position: relative;
+  }
+
+  .bg-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(99, 102, 241, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99, 102, 241, 0.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .bg-glow-1 {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    top: -200px;
+    left: -100px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .bg-glow-2 {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    bottom: -150px;
+    right: -50px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.12) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .bg-glow-3 {
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    height: 100%;
+    padding: 60px 80px;
+    gap: 60px;
+    align-items: center;
+  }
+
+  .left {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 100px;
+    padding: 6px 16px;
+    font-size: 13px;
+    color: #a5b4fc;
+    width: fit-content;
+    letter-spacing: 0.5px;
+  }
+
+  .badge-dot {
+    width: 6px;
+    height: 6px;
+    background: #6366f1;
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .title {
+    font-size: 56px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1.5px;
+  }
+
+  .title-fast {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .title-i18n {
+    background: linear-gradient(135deg, #10b981 0%, #34d399 50%, #6ee7b7 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    font-size: 18px;
+    color: #94a3b8;
+    line-height: 1.6;
+    max-width: 420px;
+  }
+
+  .subtitle strong {
+    color: #cbd5e1;
+    font-weight: 600;
+  }
+
+  .tags {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #64748b;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+
+  .tag-green {
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.06);
+  }
+
+  .tag-purple {
+    color: #a78bfa;
+    border-color: rgba(139, 92, 246, 0.2);
+    background: rgba(139, 92, 246, 0.06);
+  }
+
+  .tag-blue {
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.2);
+    background: rgba(96, 165, 250, 0.06);
+  }
+
+  .right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-end;
+  }
+
+  .code-card {
+    width: 480px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  }
+
+  .code-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .code-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  .code-dot-red { background: #ef4444; }
+  .code-dot-yellow { background: #eab308; }
+  .code-dot-green { background: #22c55e; }
+
+  .code-filename {
+    margin-left: 8px;
+    font-size: 12px;
+    color: #64748b;
+    font-family: 'Fira Code', monospace;
+  }
+
+  .code-body {
+    padding: 20px;
+    font-family: 'Fira Code', monospace;
+    font-size: 13.5px;
+    line-height: 1.8;
+    background: #161625;
+  }
+
+  .code-line {
+    display: flex;
+    gap: 20px;
+  }
+
+  .line-num {
+    color: #3b3b5c;
+    user-select: none;
+    min-width: 20px;
+    text-align: right;
+  }
+
+  .line-content { color: #e2e8f0; }
+
+  .hl-tag { color: #f472b6; }
+  .hl-attr { color: #a78bfa; }
+  .hl-str { color: #34d399; }
+  .hl-func { color: #60a5fa; }
+  .hl-key { color: #fbbf24; }
+  .hl-punct { color: #64748b; }
+  .hl-comment { color: #3b3b5c; font-style: italic; }
+
+  .arrow-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+  }
+
+  .arrow-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.4), transparent);
+  }
+
+  .arrow-icon {
+    font-size: 20px;
+    color: #6366f1;
+    animation: bounce 2s infinite;
+  }
+
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
+  .arrow-label {
+    font-size: 11px;
+    color: #6366f1;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .footer {
+    position: absolute;
+    bottom: 30px;
+    left: 80px;
+    right: 80px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1;
+  }
+
+  .footer-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .vscode-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #60a5fa;
+    font-weight: 600;
+  }
+
+  .vscode-icon {
+    width: 16px;
+    height: 16px;
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: white;
+    font-weight: 800;
+  }
+
+  .divider {
+    width: 1px;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .version {
+    font-size: 12px;
+    color: #475569;
+    font-family: 'Fira Code', monospace;
+  }
+
+  .footer-right {
+    font-size: 12px;
+    color: #334155;
+    letter-spacing: 0.5px;
+  }
+
+  .lang-icons {
+    position: absolute;
+    top: 50px;
+    right: 60px;
+    display: flex;
+    gap: 6px;
+    z-index: 1;
+  }
+
+  .lang-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .lang-zh { color: #ef4444; }
+  .lang-en { color: #3b82f6; }
+  .lang-ja { color: #eab308; }
+  .lang-ko { color: #8b5cf6; }
+</style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow-1"></div>
+  <div class="bg-glow-2"></div>
+  <div class="bg-glow-3"></div>
+
+  <div class="lang-icons">
+    <div class="lang-icon lang-zh">中</div>
+    <div class="lang-icon lang-en">En</div>
+    <div class="lang-icon lang-ja">あ</div>
+    <div class="lang-icon lang-ko">한</div>
+  </div>
+
+  <div class="container">
+    <div class="left">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        VS Code Extension
+      </div>
+
+      <div class="title">
+        <span class="title-fast">Fast</span>
+        <span class="title-i18n"> I18n</span>
+      </div>
+
+      <div class="subtitle">
+        一键将 <strong>React 项目</strong>中的硬编码文本替换为 i18n 调用。<br>
+        自动翻译 · 智能上下文 · 双语写入
+      </div>
+
+      <div class="tags">
+        <span class="tag tag-green">智能上下文</span>
+        <span class="tag tag-purple">5 种翻译引擎</span>
+        <span class="tag tag-blue">零依赖</span>
+        <span class="tag">JSX / TSX</span>
+        <span class="tag">.ts / .json</span>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="code-card">
+        <div class="code-header">
+          <span class="code-dot code-dot-red"></span>
+          <span class="code-dot code-dot-yellow"></span>
+          <span class="code-dot code-dot-green"></span>
+          <span class="code-filename">UserList.tsx</span>
+        </div>
+        <div class="code-body">
+          <div class="code-line">
+            <span class="line-num">1</span>
+            <span class="line-content"><span class="hl-comment">// 替换前</span></span>
+          </div>
+          <div class="code-line">
+            <span class="line-num">2</span>
+            <span class="line-content"><span class="hl-punct">&lt;</span><span class="hl-tag">div</span><span class="hl-punct">&gt;</span><span class="hl-str">查询客户</span><span class="hl-punct">&lt;/</span><span class="hl-tag">div</span><span class="hl-punct">&gt;</span></span>
+          </div>
+          <div class="code-line">
+            <span class="line-num">3</span>
+            <span class="line-content"><span class="hl-attr">placeholder</span><span class="hl-punct">=</span><span class="hl-str">"请输入姓名"</span></span>
+          </div>
+          <div class="arrow-section">
+            <div class="arrow-line"></div>
+            <span class="arrow-icon">↓</span>
+            <span class="arrow-label">One Click</span>
+            <span class="arrow-icon">↓</span>
+            <div class="arrow-line"></div>
+          </div>
+          <div class="code-line">
+            <span class="line-num">4</span>
+            <span class="line-content"><span class="hl-comment">// 替换后</span></span>
+          </div>
+          <div class="code-line">
+            <span class="line-num">5</span>
+            <span class="line-content"><span class="hl-punct">&lt;</span><span class="hl-tag">div</span><span class="hl-punct">&gt;</span><span class="hl-punct">{</span><span class="hl-func">t</span><span class="hl-punct">(</span><span class="hl-key">'USER_LIST.QUERY_CUSTOMER'</span><span class="hl-punct">)</span><span class="hl-punct">}</span><span class="hl-punct">&lt;/</span><span class="hl-tag">div</span><span class="hl-punct">&gt;</span></span>
+          </div>
+          <div class="code-line">
+            <span class="line-num">6</span>
+            <span class="line-content"><span class="hl-attr">placeholder</span><span class="hl-punct">=</span><span class="hl-punct">{</span><span class="hl-func">t</span><span class="hl-punct">(</span><span class="hl-key">'USER_LIST.PLEASE_ENTER_NAME'</span><span class="hl-punct">)</span><span class="hl-punct">}</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-left">
+      <div class="vscode-badge">
+        <div class="vscode-icon">VS</div>
+        VS Code Marketplace
+      </div>
+      <div class="divider"></div>
+      <span class="version">v0.1.0</span>
+    </div>
+    <div class="footer-right">React · TypeScript · i18n</div>
+  </div>
+</body>
+</html>
